@@ -1,0 +1,181 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="./output.css" rel="stylesheet">
+</head>
+<body>
+<div class="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white p-4">
+  <!-- Top buttons -->
+  <div class="flex justify-between w-full max-w-xl mb-4">
+    <div class="flex space-x-4">
+      <button id="PSX_BTN_L1" class="bg-gray-700 p-2 rounded">L1</button>
+      <button id="PSX_BTN_L2" class="bg-gray-700 p-2 rounded">L2</button>
+    </div>
+    <div class="flex space-x-4">
+      <button id="PSX_BTN_R1" class="bg-gray-700 p-2 rounded">R1</button>
+      <button id="PSX_BTN_R2" class="bg-gray-700 p-2 rounded">R2</button>
+    </div>
+  </div>
+
+  <!-- Middle section: D-pad, Select/Start, Face Buttons -->
+  <div class="flex justify-between w-full max-w-xl">
+    <!-- D-pad -->
+    <div class="grid grid-cols-3 gap-1 w-24">
+      <div></div>
+      <button id="PSX_BTN_UP" class="bg-gray-700 p-2 rounded">▲</button>
+      <div></div>
+      <button id="PSX_BTN_LEFT" class="bg-gray-700 p-2 rounded">◀</button>
+      <div></div>
+      <button id="PSX_BTN_RIGHT" class="bg-gray-700 p-2 rounded">▶</button>
+      <div></div>
+      <button id="PSX_BTN_DOWN" class="bg-gray-700 p-2 rounded">▼</button>
+    </div>
+
+    <!-- Select / Start -->
+    <div class="flex flex-col items-center space-y-2">
+      <button id="PSX_BTN_START" class="bg-gray-600 px-4 py-1 rounded">Select</button>
+      <button id="PSX_BTN_SELECT" class="bg-gray-600 px-4 py-1 rounded">Start</button>
+      <h2 id="status">Not Connected</h2>
+      <button id="connect">CONNECT</button>
+    </div>
+
+    <!-- Face Buttons -->
+    <div class="grid grid-cols-3 gap-1 w-24">
+      <div></div>
+      <button id="PSX_BTN_TRI" class="bg-blue-600 p-2 rounded-full">△</button>
+      <div></div>
+      <button id="PSX_BTN_SQR" class="bg-pink-600 p-2 rounded-full">◀</button>
+      <div></div>
+      <button id="PSX_BTN_O" class="bg-red-600 p-2 rounded-full">▶</button>
+      <div></div>
+      <button id="PSX_BTN_X" class="bg-green-600 p-2 rounded-full">✕</button>
+    </div>
+  </div>
+</div>
+</body>
+
+<script>
+
+const PSX_SERVICE =  '104d5838-18c2-490b-967e-2b7ebb647fd5';
+const PSX_CTRL_CHAR = '908fd10a-50a9-44b4-9cac-9526c0f6b250';
+
+let controllerCharacteristic = null;
+let statusElement = null;
+let keepAlive = null;
+let bitmask = new Uint8Array([0, 0]);
+
+const sendBitMask = () => {
+    if (controllerCharacteristic) {
+        controllerCharacteristic.writeValueWithoutResponse(bitmask);
+    }
+}
+
+const setCtrlBit = (bitNumber) => {
+    if(bitNumber >= 8) {
+      bitmask[1] |= (1 << bitNumber - 8);
+    } else {
+      bitmask[0] |= (1 << bitNumber);
+    }
+    sendBitMask();
+}
+
+const clearCtrlBit = (bitNumber) => {
+    if(bitNumber >= 8) {
+      bitmask[1] &= ~(1 << bitNumber - 8);
+    } else {
+      bitmask[0] &= ~(1 << bitNumber);
+    }
+    sendBitMask();
+}
+
+const fetchCTRLCharacteristic = async (service) => {
+    controllerCharacteristic = await service.getCharacteristic(PSX_CTRL_CHAR);
+}
+
+const openDevice = async (device) => {
+    const server = await device.gatt.connect();  
+    try {
+        const service = await server.getPrimaryService(PSX_SERVICE);
+
+        await fetchCTRLCharacteristic(service);
+
+        console.log('Connected to device', device);
+        statusElement.innerHTML = `Connected to ${device.name}`
+        keepAlive = setInterval(() => sendBitMask(), 10000);
+
+        device.ongattserverdisconnected = _ => {
+            console.log(`Disconnected ${device.id}`);
+            clearInterval(keepAlive);
+            statusElement.innerHTML = "Not Connected";
+        };
+    } catch (err) {
+        console.warn(err);
+    }
+}
+
+const scan = async () => {
+    try {
+        console.log(`Truing to connect`);
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{ services: [PSX_SERVICE] }]
+        });
+        console.log(`Await returned`);
+        await openDevice(device);
+    } catch (err) {
+        // ignore if we didn't get a device
+    }
+}
+
+const init = () => {
+    document.querySelector('#PSX_BTN_SQR').addEventListener('mousedown', () => setCtrlBit(15));
+    document.querySelector('#PSX_BTN_SQR').addEventListener('mouseup', () => clearCtrlBit(15));
+
+    document.querySelector('#PSX_BTN_X').addEventListener('mousedown', () => setCtrlBit(14));
+    document.querySelector('#PSX_BTN_X').addEventListener('mouseup', () => clearCtrlBit(14));
+
+    document.querySelector('#PSX_BTN_O').addEventListener('mousedown', () => setCtrlBit(13));
+    document.querySelector('#PSX_BTN_O').addEventListener('mouseup', () => clearCtrlBit(13));
+
+    document.querySelector('#PSX_BTN_TRI').addEventListener('mousedown', () => setCtrlBit(12));
+    document.querySelector('#PSX_BTN_TRI').addEventListener('mouseup', () => clearCtrlBit(12));
+
+    document.querySelector('#PSX_BTN_R1').addEventListener('mousedown', () => setCtrlBit(11));
+    document.querySelector('#PSX_BTN_R1').addEventListener('mouseup', () => clearCtrlBit(11));
+
+    document.querySelector('#PSX_BTN_L1').addEventListener('mousedown', () => setCtrlBit(10));
+    document.querySelector('#PSX_BTN_L1').addEventListener('mouseup', () => clearCtrlBit(10));
+
+    document.querySelector('#PSX_BTN_R2').addEventListener('mousedown', () => setCtrlBit(9));
+    document.querySelector('#PSX_BTN_R2').addEventListener('mouseup', () => clearCtrlBit(9));
+
+    document.querySelector('#PSX_BTN_L2').addEventListener('mousedown', () => setCtrlBit(8));
+    document.querySelector('#PSX_BTN_L2').addEventListener('mouseup', () => clearCtrlBit(8));
+
+    document.querySelector('#PSX_BTN_LEFT').addEventListener('mousedown', () => setCtrlBit(7));
+    document.querySelector('#PSX_BTN_LEFT').addEventListener('mouseup', () => clearCtrlBit(7));
+
+    document.querySelector('#PSX_BTN_DOWN').addEventListener('mousedown', () => setCtrlBit(6));
+    document.querySelector('#PSX_BTN_DOWN').addEventListener('mouseup', () => clearCtrlBit(6));
+
+    document.querySelector('#PSX_BTN_RIGHT').addEventListener('mousedown', () => setCtrlBit(5));
+    document.querySelector('#PSX_BTN_RIGHT').addEventListener('mouseup', () => clearCtrlBit(5));
+
+    document.querySelector('#PSX_BTN_UP').addEventListener('mousedown', () => setCtrlBit(4));
+    document.querySelector('#PSX_BTN_UP').addEventListener('mouseup', () => clearCtrlBit(4));
+
+    document.querySelector('#PSX_BTN_START').addEventListener('mousedown', () => setCtrlBit(3));
+    document.querySelector('#PSX_BTN_START').addEventListener('mouseup', () => clearCtrlBit(3));
+
+    document.querySelector('#PSX_BTN_SELECT').addEventListener('mousedown', () => setCtrlBit(0));
+    document.querySelector('#PSX_BTN_SELECT').addEventListener('mouseup', () => clearCtrlBit(0));
+
+    document.querySelector('#connect').addEventListener('click', scan);
+    statusElement = document.querySelector('#status');
+}
+
+window.addEventListener('load', init);
+
+</script>
+</html>
