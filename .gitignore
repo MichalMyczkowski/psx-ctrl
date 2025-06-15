@@ -1,0 +1,6 @@
+# Zephyr build output
+app/build*/
+# MacOS
+.DS_Store
+# VS Code local configs
+.vscode/
