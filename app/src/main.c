@@ -3,13 +3,13 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/counter.h>
 #include <zephyr/drivers/spi.h>
+#include <zephyr/sys/reboot.h>
 #include <stdio.h>
 
 // TIMER
 
 const struct device *const counter_dev = DEVICE_DT_GET(DT_ALIAS(psx_timer));
 struct counter_alarm_cfg alarm_cfg;
-struct counter_alarm_cfg alarm_cfg2;
 
 // GPIOS
 
@@ -17,6 +17,7 @@ const struct device *gpio_dev = DEVICE_DT_GET(DT_ALIAS(psx_gpio));
 
 #define ACK_PIN 2
 #define ACK_PIN_FLAGS GPIO_OUTPUT
+#define ATT_PIN 3
 
 atomic_t psx_bt_mask = ATOMIC_INIT(0x0000);
 
@@ -56,18 +57,6 @@ static struct spi_buf_set rxbs = {
 
 // ACK LINE handler
 
-#define FALL_CHANNEL 0
-#define RISE_CHANNEL 1
-
-static void counter_rising_cb(const struct device *counter_dev,
-                              uint8_t chan_id, uint32_t ticks,
-                              void *user_data)
-{
-    alarm_cfg.ticks = counter_us_to_ticks(counter_dev, 25);
-    gpio_pin_set(gpio_dev, ACK_PIN, 0);
-    counter_set_channel_alarm(counter_dev, FALL_CHANNEL, &alarm_cfg);
-}
-
 static int ack_cnt = 0;
 static void counter_falling_cb(const struct device *counter_dev,
                                uint8_t chan_id, uint32_t ticks,
@@ -77,7 +66,16 @@ static void counter_falling_cb(const struct device *counter_dev,
     {
         ack_cnt += 1;
         gpio_pin_set(gpio_dev, ACK_PIN, 1);
-        counter_set_channel_alarm(counter_dev, RISE_CHANNEL, &alarm_cfg2);
+        gpio_pin_set(gpio_dev, ACK_PIN, 0);
+        if (ack_cnt == 1)
+        {
+            alarm_cfg.ticks = counter_us_to_ticks(counter_dev, 45);
+        }
+        else
+        {
+            alarm_cfg.ticks = counter_us_to_ticks(counter_dev, 25);
+        }
+        counter_set_channel_alarm(counter_dev, 0, &alarm_cfg);
     }
     else
     {
@@ -103,8 +101,8 @@ void attention_cb(const struct device *dev,
         &rxbs,    // const struct spi_buf_set * 	rx_bufs,
         NULL,
         NULL);
-    alarm_cfg.ticks = counter_us_to_ticks(counter_dev, 20);
-    counter_set_channel_alarm(counter_dev, FALL_CHANNEL, &alarm_cfg);
+    alarm_cfg.ticks = counter_us_to_ticks(counter_dev, 30);
+    counter_set_channel_alarm(counter_dev, 0, &alarm_cfg);
 }
 
 int psx_init()
@@ -127,9 +125,9 @@ int psx_init()
     }
 
     // set up ATTENTION callback
-    gpio_init_callback(&attention_cb_data, attention_cb, BIT(3));
+    gpio_init_callback(&attention_cb_data, attention_cb, BIT(ATT_PIN));
     gpio_add_callback(gpio_dev, &attention_cb_data);
-    gpio_pin_interrupt_configure(gpio_dev, 3, GPIO_INT_EDGE_FALLING);
+    gpio_pin_interrupt_configure(gpio_dev, ATT_PIN, GPIO_INT_EDGE_FALLING);
 
     int ret = gpio_pin_configure(gpio_dev, ACK_PIN, GPIO_OUTPUT);
     if (ret)
@@ -145,10 +143,6 @@ int psx_init()
     alarm_cfg.ticks = counter_us_to_ticks(counter_dev, 20);
     alarm_cfg.callback = counter_falling_cb;
     alarm_cfg.user_data = &alarm_cfg;
-    alarm_cfg2.flags = 0;
-    alarm_cfg2.ticks = counter_us_to_ticks(counter_dev, 3);
-    alarm_cfg2.callback = counter_rising_cb;
-    alarm_cfg2.user_data = &alarm_cfg2;
 
     return 0;
 }
@@ -182,7 +176,7 @@ static ssize_t write_psx(struct bt_conn *conn, const struct bt_gatt_attr *attr,
     {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
-
+    
     (void)memcpy(&btn_mask, buf, len);
 
     atomic_set(&psx_bt_mask, btn_mask);
@@ -240,6 +234,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
     printk("%s: Disconnected (reason 0x%02x)\n", __func__, reason);
+    sys_reboot(SYS_REBOOT_COLD);
 
     // start advertising again
     int err = bt_le_adv_start(BT_LE_ADV_CONN_NAME, ad, ARRAY_SIZE(ad), NULL, 0);
